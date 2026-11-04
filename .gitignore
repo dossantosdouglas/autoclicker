@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+*.o
+*.res
+*.tmp
+test_*
+
+# User config local files
+*.ini
+!default_config.ini
+config.json
