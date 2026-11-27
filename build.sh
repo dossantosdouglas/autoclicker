@@ -21,7 +21,7 @@ clang -O2 \
   -I/usr/include/wine/windows \
   -fuse-ld=lld \
   -Wl,-subsystem:windows \
-  -Wl,-entry:WinMain \
+  -Wl,-entry:WinMainCRTStartup \
   -Wl,-nodefaultlib \
   windows/main.c \
   windows/resources.res \
