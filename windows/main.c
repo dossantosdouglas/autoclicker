@@ -1,8 +1,9 @@
 /*
  * AutoClicker Multi-Point / Multi-Ponto for Windows (Adwaita Dark Red UI)
  * Native Win32 64-bit with:
- * - Full Per-Monitor DPI scaling (crisp and properly sized on 100%, 125%, 150%, 200% screens)
- * - Resizable & maximizable window with responsive layout (WS_OVERLAPPEDWINDOW + WM_SIZE)
+ * - Full Per-Monitor DPI scaling (100%, 125%, 150%, 200%)
+ * - Full horizontal & vertical resizing (WS_OVERLAPPEDWINDOW + WM_SIZE)
+ * - Automatic vertical scrolling (WM_MOUSEWHEEL + WM_VSCROLL) when window is reduced
  * - Dark titlebar (Windows 10/11 DWM), rounded grouped cards, steppers, presets, EN/PT toggle
  */
 
@@ -13,6 +14,10 @@
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
+#endif
+
+#ifndef GET_WHEEL_DELTA_WPARAM
+#define GET_WHEEL_DELTA_WPARAM(wParam) ((short)HIWORD(wParam))
 #endif
 
 #define IDI_APP_ICON 101
@@ -50,11 +55,11 @@
 #define CLR_SWITCH_OFF    RGB(86, 86, 86)     // #565656 Switch desligado
 #define CLR_KNOB          RGB(252, 252, 252)  // #FCFCFC Bolinha switch
 
-// Dimensoes base (em 96 DPI - escaladas automaticamente pelo DPI do monitor!)
+// Dimensoes base (em 96 DPI)
 #define BASE_CLIENT_W     580
-#define BASE_CLIENT_H     790
-#define MIN_CLIENT_W      500
-#define MIN_CLIENT_H      760
+#define BASE_CLIENT_H     744
+#define MIN_CLIENT_W      460
+#define MIN_CLIENT_H      340
 
 // IDs de controles
 #define IDC_BTN_SAVE         2001
@@ -111,6 +116,8 @@ static TargetConfig g_targets[2] = {
 };
 
 static int g_dpi = 96;
+static int g_scroll_y = 0;
+static int g_total_content_h = 744;
 static int g_lang = INIT_LANG; // 0 = PT-BR, 1 = EN
 static int g_active_tab = 0;   // 0 = Point 1, 1 = Point 2
 static BOOL g_is_running = FALSE;
@@ -138,7 +145,6 @@ static HBRUSH g_brRow    = NULL;
 
 static char g_ini_path[MAX_PATH] = {0};
 
-// Escala DPI limpa: converte pixels base (96 DPI) para o DPI real do monitor
 static int S(int px) {
     return MulDiv(px, g_dpi, 96);
 }
@@ -181,15 +187,15 @@ static void DestroyFonts(void) {
 
 static void CreateScaledFonts(void) {
     DestroyFonts();
-    g_hFontHdrTitle  = CreateFontA(-S(15), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    g_hFontHdrSub    = CreateFontA(-S(12), 0, 0, 0, FW_NORMAL,   FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    g_hFontCardTitle = CreateFontA(-S(17), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    g_hFontTimer     = CreateFontA(-S(32), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    g_hFontSection   = CreateFontA(-S(14), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    g_hFontBtnBig    = CreateFontA(-S(15), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    g_hFontUi        = CreateFontA(-S(14), 0, 0, 0, FW_NORMAL,   FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    g_hFontUiBold    = CreateFontA(-S(14), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    g_hFontSmall     = CreateFontA(-S(12), 0, 0, 0, FW_NORMAL,   FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontHdrTitle  = CreateFontA(-S(14), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontHdrSub    = CreateFontA(-S(11), 0, 0, 0, FW_NORMAL,   FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontCardTitle = CreateFontA(-S(16), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontTimer     = CreateFontA(-S(30), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontSection   = CreateFontA(-S(13), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontBtnBig    = CreateFontA(-S(14), 0, 0, 0, FW_BOLD,     FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontUi        = CreateFontA(-S(13), 0, 0, 0, FW_NORMAL,   FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontUiBold    = CreateFontA(-S(13), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+    g_hFontSmall     = CreateFontA(-S(11), 0, 0, 0, FW_NORMAL,   FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
 }
 
 static void ApplyFontsToEdits(HWND hwnd) {
@@ -334,95 +340,167 @@ static void RedrawAll(void) {
     }
 }
 
+// Calcula a altura total do conteudo em pixels atuais (DPI-scaled)
+typedef struct {
+    int pad;
+    int hdrH;
+    int yBtn;
+    int yTabs;
+    int cy;
+    int g1y;
+    int rH1;
+    int g2y;
+    int rH2;
+    int py;
+    int g3y;
+    int rH3;
+    int yTest;
+    int chCard;
+    int totalH;
+} LayoutMetrics;
+
+static void ComputeMetrics(LayoutMetrics *m) {
+    m->pad   = S(16);
+    m->hdrH  = S(46);
+    m->yBtn  = m->hdrH + S(10);
+    m->yTabs = m->yBtn + S(48);
+    m->cy    = m->yTabs + S(42);
+    m->rH1   = S(40);
+    m->rH2   = S(36);
+    m->rH3   = S(36);
+    m->g1y   = m->cy + S(126);
+    m->g2y   = m->g1y + m->rH1 * 4 + S(28);
+    m->py    = m->g2y + m->rH2 * 2 + S(8);
+    m->g3y   = m->py + S(54);
+    m->yTest = m->g3y + m->rH3 * 2 + S(10);
+    m->chCard = (m->yTest + S(34) + S(14)) - m->cy;
+    m->totalH = m->cy + m->chCard + m->pad;
+}
+
+static void UpdateScrollInfo(HWND hwnd) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    int ch = rc.bottom - rc.top;
+
+    LayoutMetrics m;
+    ComputeMetrics(&m);
+    g_total_content_h = m.totalH;
+
+    int maxScroll = g_total_content_h - ch;
+    if (maxScroll < 0) maxScroll = 0;
+    if (g_scroll_y > maxScroll) g_scroll_y = maxScroll;
+    if (g_scroll_y < 0) g_scroll_y = 0;
+
+    SCROLLINFO si = {0};
+    si.cbSize = sizeof(SCROLLINFO);
+    si.fMask  = SIF_RANGE | SIF_PAGE | SIF_POS;
+    si.nMin   = 0;
+    if (maxScroll == 0) {
+        si.nMax  = 0;
+        si.nPage = (UINT)(ch + 1);
+        si.nPos  = 0;
+    } else {
+        si.nMax  = g_total_content_h - 1;
+        si.nPage = (UINT)ch;
+        si.nPos  = g_scroll_y;
+    }
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+}
+
 static void LayoutControls(HWND hwnd) {
+    UpdateScrollInfo(hwnd);
+
     RECT rc;
     GetClientRect(hwnd, &rc);
     int cw = rc.right - rc.left;
-    int ch = rc.bottom - rc.top;
-    if (cw < S(300) || ch < S(300)) return;
+    if (cw < S(260)) return;
 
-    int pad = S(18);
-    int contentW = cw - pad * 2;
-    int hdrH = S(50);
+    LayoutMetrics m;
+    ComputeMetrics(&m);
+
+    int oy = -g_scroll_y;
+    int contentW = cw - m.pad * 2;
 
     // Header buttons
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_SAVE), S(14), S(9), S(74), S(32), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_LANG), cw - S(62), S(9), S(48), S(32), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_SAVE), S(12), oy + S(8), S(72), S(30), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_LANG), cw - S(58), oy + S(8), S(46), S(30), TRUE);
 
     // Big Red Start/Stop Button
-    int yBtn = hdrH + S(12);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_TOGGLE), pad, yBtn, contentW, S(44), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_TOGGLE), m.pad, oy + m.yBtn, contentW, S(40), TRUE);
 
     // Tabs P1 / P2
-    int yTabs = yBtn + S(54);
-    int tabGap = S(10);
+    int tabGap = S(8);
     int tabW = (contentW - tabGap) / 2;
-    MoveWindow(GetDlgItem(hwnd, IDC_TAB_P1), pad, yTabs, tabW, S(36), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_TAB_P2), pad + tabW + tabGap, yTabs, contentW - tabW - tabGap, S(36), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_TAB_P1), m.pad, oy + m.yTabs, tabW, S(34), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_TAB_P2), m.pad + tabW + tabGap, oy + m.yTabs, contentW - tabW - tabGap, S(34), TRUE);
 
-    // Card coordinates
-    int cy = yTabs + S(46);
-    int sx = pad + S(16);
-    int sw = contentW - S(32);
+    int sx = m.pad + S(14);
+    int sw = contentW - S(28);
     int rightEdge = sx + sw;
 
-    // Enable Switch (top-right inside card)
-    MoveWindow(GetDlgItem(hwnd, IDC_SW_ENABLED), rightEdge - S(50), cy + S(12), S(50), S(28), TRUE);
+    // Enable Switch
+    MoveWindow(GetDlgItem(hwnd, IDC_SW_ENABLED), rightEdge - S(48), oy + m.cy + S(10), S(48), S(26), TRUE);
 
-    // Section 1: Click Location (4 rows x 44px)
-    int g1y = cy + S(142);
-    int rH1 = S(44);
-    MoveWindow(GetDlgItem(hwnd, IDC_SW_FIXED), rightEdge - S(62), g1y + S(8), S(50), S(28), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_PICK), rightEdge - S(162), g1y + rH1 + S(5), S(150), S(34), TRUE);
+    // Section 1: Click Location
+    MoveWindow(GetDlgItem(hwnd, IDC_SW_FIXED), rightEdge - S(58), oy + m.g1y + S(7), S(48), S(26), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_PICK), rightEdge - S(156), oy + m.g1y + m.rH1 + S(4), S(144), S(32), TRUE);
 
-    // Stepper geometry
-    int stSize = S(28);
-    int stIncX = rightEdge - S(12) - stSize;
-    int stDecX = stIncX - S(8) - stSize;
-    int edtW   = S(68);
-    int edtH   = S(22);
-    int edtX   = stDecX - S(10) - edtW;
+    int stSize = S(26);
+    int stIncX = rightEdge - S(10) - stSize;
+    int stDecX = stIncX - S(6) - stSize;
+    int edtW   = S(64);
+    int edtH   = S(20);
+    int edtX   = stDecX - S(8) - edtW;
 
-    // Row 3: X
-    int r3y = g1y + rH1 * 2;
-    MoveWindow(GetDlgItem(hwnd, IDC_EDT_X),     edtX,   r3y + (rH1 - edtH) / 2,   edtW,   edtH,   TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_X_DEC), stDecX, r3y + (rH1 - stSize) / 2, stSize, stSize, TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_X_INC), stIncX, r3y + (rH1 - stSize) / 2, stSize, stSize, TRUE);
+    int r3y = oy + m.g1y + m.rH1 * 2;
+    MoveWindow(GetDlgItem(hwnd, IDC_EDT_X),     edtX,   r3y + (m.rH1 - edtH) / 2,   edtW,   edtH,   TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_X_DEC), stDecX, r3y + (m.rH1 - stSize) / 2, stSize, stSize, TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_X_INC), stIncX, r3y + (m.rH1 - stSize) / 2, stSize, stSize, TRUE);
 
-    // Row 4: Y
-    int r4y = g1y + rH1 * 3;
-    MoveWindow(GetDlgItem(hwnd, IDC_EDT_Y),     edtX,   r4y + (rH1 - edtH) / 2,   edtW,   edtH,   TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_Y_DEC), stDecX, r4y + (rH1 - stSize) / 2, stSize, stSize, TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_Y_INC), stIncX, r4y + (rH1 - stSize) / 2, stSize, stSize, TRUE);
+    int r4y = oy + m.g1y + m.rH1 * 3;
+    MoveWindow(GetDlgItem(hwnd, IDC_EDT_Y),     edtX,   r4y + (m.rH1 - edtH) / 2,   edtW,   edtH,   TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_Y_DEC), stDecX, r4y + (m.rH1 - stSize) / 2, stSize, stSize, TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_Y_INC), stIncX, r4y + (m.rH1 - stSize) / 2, stSize, stSize, TRUE);
 
-    // Section 2: Time Interval (2 rows x 40px)
-    int g2y = g1y + rH1 * 4 + S(32);
-    int rH2 = S(40);
-    MoveWindow(GetDlgItem(hwnd, IDC_EDT_MIN),     edtX,   g2y + (rH2 - edtH) / 2,         edtW,   edtH,   TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_MIN_DEC), stDecX, g2y + (rH2 - stSize) / 2,       stSize, stSize, TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_MIN_INC), stIncX, g2y + (rH2 - stSize) / 2,       stSize, stSize, TRUE);
+    // Section 2: Time Interval
+    int r5y = oy + m.g2y;
+    MoveWindow(GetDlgItem(hwnd, IDC_EDT_MIN),     edtX,   r5y + (m.rH2 - edtH) / 2,   edtW,   edtH,   TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_MIN_DEC), stDecX, r5y + (m.rH2 - stSize) / 2, stSize, stSize, TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_MIN_INC), stIncX, r5y + (m.rH2 - stSize) / 2, stSize, stSize, TRUE);
 
-    MoveWindow(GetDlgItem(hwnd, IDC_EDT_SEC),     edtX,   g2y + rH2 + (rH2 - edtH) / 2,   edtW,   edtH,   TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_SEC_DEC), stDecX, g2y + rH2 + (rH2 - stSize) / 2, stSize, stSize, TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_SEC_INC), stIncX, g2y + rH2 + (rH2 - stSize) / 2, stSize, stSize, TRUE);
+    int r6y = oy + m.g2y + m.rH2;
+    MoveWindow(GetDlgItem(hwnd, IDC_EDT_SEC),     edtX,   r6y + (m.rH2 - edtH) / 2,   edtW,   edtH,   TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_SEC_DEC), stDecX, r6y + (m.rH2 - stSize) / 2, stSize, stSize, TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_SEC_INC), stIncX, r6y + (m.rH2 - stSize) / 2, stSize, stSize, TRUE);
 
-    // Quick Presets Row (distributed evenly across sw)
-    int py = g2y + rH2 * 2 + S(10);
+    // Presets
     int pGap = S(4);
     int pW = (sw - pGap * 6) / 7;
     for (int i = 0; i < 7; i++) {
-        MoveWindow(GetDlgItem(hwnd, IDC_PRESET_5S + i), sx + i * (pW + pGap), py, pW, S(28), TRUE);
+        MoveWindow(GetDlgItem(hwnd, IDC_PRESET_5S + i), sx + i * (pW + pGap), oy + m.py, pW, S(26), TRUE);
     }
 
-    // Section 3: Button Options (2 rows x 38px)
-    int g3y = py + S(60);
-    int rH3 = S(38);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_MBTN), rightEdge - S(132), g3y + S(5),       S(120), S(28), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_SW_DBL),   rightEdge - S(62),  g3y + rH3 + S(5), S(50),  S(28), TRUE);
+    // Section 3: Button Options
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_MBTN), rightEdge - S(124), oy + m.g3y + S(4),         S(112), S(28), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SW_DBL),   rightEdge - S(58),  oy + m.g3y + m.rH3 + S(5), S(48),  S(26), TRUE);
 
-    // Test Click Button (bottom of card)
-    int yTest = g3y + rH3 * 2 + S(12);
-    MoveWindow(GetDlgItem(hwnd, IDC_BTN_TEST), sx, yTest, sw, S(36), TRUE);
+    // Test Click Button
+    MoveWindow(GetDlgItem(hwnd, IDC_BTN_TEST), sx, oy + m.yTest, sw, S(34), TRUE);
+}
+
+static void SetScrollPosAndRefresh(HWND hwnd, int newPos) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    int ch = rc.bottom - rc.top;
+    int maxScroll = g_total_content_h - ch;
+    if (maxScroll < 0) maxScroll = 0;
+    if (newPos < 0) newPos = 0;
+    if (newPos > maxScroll) newPos = maxScroll;
+    if (newPos != g_scroll_y) {
+        g_scroll_y = newPos;
+        LayoutControls(hwnd);
+        RedrawAll();
+    }
 }
 
 static void ToggleRunning(void) {
@@ -523,27 +601,28 @@ static void PaintMainWindow(HWND hwnd) {
     HBITMAP hBmp = CreateCompatibleBitmap(hdcScreen, cw, ch);
     HBITMAP oldBmp = (HBITMAP)SelectObject(hdc, hBmp);
 
-    int pad = S(18);
-    int contentW = cw - pad * 2;
-    int hdrH = S(50);
+    LayoutMetrics m;
+    ComputeMetrics(&m);
+    int oy = -g_scroll_y;
+    int contentW = cw - m.pad * 2;
 
     // 1. Fundo principal
     FillRect(hdc, &rcClient, g_brBg);
 
     // 2. Top HeaderBar
-    RECT rcHdr = { 0, 0, cw, hdrH };
+    RECT rcHdr = { 0, oy, cw, oy + m.hdrH };
     FillRect(hdc, &rcHdr, g_brHeader);
-    DrawHLine(hdc, 0, cw, hdrH, RGB(54, 54, 54));
+    DrawHLine(hdc, 0, cw, oy + m.hdrH, RGB(54, 54, 54));
 
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontHdrTitle);
-    RECT rcHdrT = { S(96), S(6), cw - S(96), S(28) };
+    RECT rcHdrT = { S(90), oy + S(5), cw - S(90), oy + S(25) };
     DrawTextA(hdc, T("AutoClicker Multi-Ponto", "AutoClicker Multi-Point"), -1, &rcHdrT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     SetTextColor(hdc, g_show_saved_toast ? CLR_GREEN : CLR_TEXT_SUB);
     SelectObject(hdc, g_hFontHdrSub);
-    RECT rcHdrS = { S(96), S(27), cw - S(96), S(45) };
+    RECT rcHdrS = { S(90), oy + S(24), cw - S(90), oy + S(42) };
     DrawTextA(hdc, g_show_saved_toast
               ? T("Configuracoes salvas com sucesso!", "Settings saved successfully!")
               : T("Suporte a multiplos monitores (X e Y)", "Multi-monitor support (X & Y)"),
@@ -551,27 +630,18 @@ static void PaintMainWindow(HWND hwnd) {
 
     // 3. Card Principal
     TargetConfig *t = CurTarget();
-    int cx = pad;
-    int cy = hdrH + S(12) + S(54) + S(46);
+    int cx = m.pad;
+    int cy = oy + m.cy;
     int cwCard = contentW;
-
-    int rH1 = S(44);
-    int rH2 = S(40);
-    int rH3 = S(38);
-    int g1y = cy + S(142);
-    int g2y = g1y + rH1 * 4 + S(32);
-    int py  = g2y + rH2 * 2 + S(10);
-    int g3y = py + S(60);
-    int yTest = g3y + rH3 * 2 + S(12);
-    int chCard = (yTest + S(36) + S(14)) - cy;
-    if (cy + chCard < ch - pad) {
-        chCard = (ch - pad) - cy;
+    int chCard = m.chCard;
+    if (g_scroll_y == 0 && (cy + chCard < ch - m.pad)) {
+        chCard = (ch - m.pad) - cy;
     }
 
     FillRoundRect(hdc, cx, cy, cwCard, chCard, S(14), CLR_CARD, CLR_CARD_BORDER);
 
-    int sx = cx + S(16);
-    int sw = cwCard - S(32);
+    int sx = cx + S(14);
+    int sw = cwCard - S(28);
 
     // Titulo do Ponto
     const char *pTitle = (g_active_tab == 0)
@@ -579,7 +649,7 @@ static void PaintMainWindow(HWND hwnd) {
         : T("Ponto 2 (Tempo Y)", "Point 2 (Time Y)");
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontCardTitle);
-    RECT rcPTitle = { sx, cy + S(12), sx + sw - S(70), cy + S(38) };
+    RECT rcPTitle = { sx, cy + S(10), sx + sw - S(64), cy + S(34) };
     DrawTextA(hdc, pTitle, -1, &rcPTitle, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // Status & Cliques
@@ -588,7 +658,7 @@ static void PaintMainWindow(HWND hwnd) {
         : (g_is_running ? T("Ativo - Contando", "Active - Running") : T("Parado", "Stopped"));
     SetTextColor(hdc, CLR_TEXT_MUTED);
     SelectObject(hdc, g_hFontSmall);
-    RECT rcSt = { sx, cy + S(40), sx + S(220), cy + S(58) };
+    RECT rcSt = { sx, cy + S(36), sx + S(200), cy + S(52) };
     DrawTextA(hdc, stText, -1, &rcSt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     char cntBuf[48];
@@ -597,7 +667,7 @@ static void PaintMainWindow(HWND hwnd) {
     else
         wsprintfA(cntBuf, "%d clique%s", t->total_clicks, (t->total_clicks == 1) ? "" : "s");
     SetTextColor(hdc, CLR_ACCENT);
-    RECT rcCnt = { sx + sw - S(150), cy + S(40), sx + sw, cy + S(58) };
+    RECT rcCnt = { sx + sw - S(140), cy + S(36), sx + sw, cy + S(52) };
     DrawTextA(hdc, cntBuf, -1, &rcCnt, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
     // Cronometro Gigante Centralizado
@@ -605,11 +675,11 @@ static void PaintMainWindow(HWND hwnd) {
     FormatCountdown(t, timeBuf);
     SetTextColor(hdc, t->enabled ? CLR_TEXT_PRIMARY : CLR_TEXT_SUB);
     SelectObject(hdc, g_hFontTimer);
-    RECT rcTimer = { sx, cy + S(54), sx + sw, cy + S(96) };
+    RECT rcTimer = { sx, cy + S(48), sx + sw, cy + S(86) };
     DrawTextA(hdc, timeBuf, -1, &rcTimer, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     // Barra de Progresso Vermelha
-    int by = cy + S(102), bh = S(6);
+    int by = cy + S(92), bh = S(6);
     FillRoundRect(hdc, sx, by, sw, bh, bh, CLR_TRACK_BG, CLR_TRACK_BG);
     if (t->enabled && t->interval_ms > 0) {
         DWORD rem_ms = t->interval_ms;
@@ -625,76 +695,79 @@ static void PaintMainWindow(HWND hwnd) {
     }
 
     // SECAO 1: Click Location
+    int g1y = oy + m.g1y;
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontSection);
-    RECT rcS1 = { sx, g1y - S(24), sx + sw, g1y - S(4) };
+    RECT rcS1 = { sx, g1y - S(22), sx + sw, g1y - S(3) };
     DrawTextA(hdc, T("Local do Clique (Multi-Monitor)", "Click Location (Multi-Monitor)"), -1, &rcS1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    int g1h = rH1 * 4;
+    int g1h = m.rH1 * 4;
     FillRoundRect(hdc, sx, g1y, sw, g1h, S(12), CLR_ROW, CLR_DIVIDER);
-    DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + rH1,     CLR_DIVIDER);
-    DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + rH1 * 2, CLR_DIVIDER);
-    DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + rH1 * 3, CLR_DIVIDER);
+    DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + m.rH1,     CLR_DIVIDER);
+    DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + m.rH1 * 2, CLR_DIVIDER);
+    DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + m.rH1 * 3, CLR_DIVIDER);
 
     // Row 1
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
-    RECT r1t = { sx + S(14), g1y + S(5), sx + sw - S(72), g1y + S(24) };
+    RECT r1t = { sx + S(12), g1y + S(4), sx + sw - S(68), g1y + S(21) };
     DrawTextA(hdc, T("Usar Posicao Fixa na Tela", "Use Fixed Screen Position"), -1, &r1t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SetTextColor(hdc, CLR_TEXT_SUB); SelectObject(hdc, g_hFontSmall);
-    RECT r1s = { sx + S(14), g1y + S(23), sx + sw - S(72), g1y + S(40) };
+    RECT r1s = { sx + S(12), g1y + S(21), sx + sw - S(68), g1y + S(36) };
     DrawTextA(hdc, T("Mover o mouse para coordenadas especificas antes de clicar", "Move mouse to specific coordinates before clicking"),
               -1, &r1s, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // Row 2
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
-    RECT r2t = { sx + S(14), g1y + rH1 + S(5), sx + sw - S(172), g1y + rH1 + S(24) };
+    RECT r2t = { sx + S(12), g1y + m.rH1 + S(4), sx + sw - S(166), g1y + m.rH1 + S(21) };
     DrawTextA(hdc, T("Selecionar Alvo Visualmente", "Pick Target Visually"), -1, &r2t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SetTextColor(hdc, CLR_TEXT_SUB); SelectObject(hdc, g_hFontSmall);
-    RECT r2s = { sx + S(14), g1y + rH1 + S(23), sx + sw - S(172), g1y + rH1 + S(40) };
+    RECT r2s = { sx + S(12), g1y + m.rH1 + S(21), sx + sw - S(166), g1y + m.rH1 + S(36) };
     char coordHint[80];
     wsprintfA(coordHint, T("Alvo atual: Global (%d, %d)", "Current target: Global (%d, %d)"), t->x, t->y);
     DrawTextA(hdc, coordHint, -1, &r2s, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // Row 3 & Row 4
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
-    RECT r3t = { sx + S(14), g1y + rH1 * 2, sx + sw - S(160), g1y + rH1 * 3 };
+    RECT r3t = { sx + S(12), g1y + m.rH1 * 2, sx + sw - S(150), g1y + m.rH1 * 3 };
     DrawTextA(hdc, T("Coordenada Global X (pixels)", "Global X Coordinate (pixels)"), -1, &r3t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    RECT r4t = { sx + S(14), g1y + rH1 * 3, sx + sw - S(160), g1y + rH1 * 4 };
+    RECT r4t = { sx + S(12), g1y + m.rH1 * 3, sx + sw - S(150), g1y + m.rH1 * 4 };
     DrawTextA(hdc, T("Coordenada Global Y (pixels)", "Global Y Coordinate (pixels)"), -1, &r4t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // SECAO 2: Time Interval
+    int g2y = oy + m.g2y;
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontSection);
-    RECT rcS2 = { sx, g2y - S(24), sx + sw, g2y - S(4) };
+    RECT rcS2 = { sx, g2y - S(22), sx + sw, g2y - S(3) };
     DrawTextA(hdc, T("Intervalo de Tempo", "Time Interval"), -1, &rcS2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    int g2h = rH2 * 2;
+    int g2h = m.rH2 * 2;
     FillRoundRect(hdc, sx, g2y, sw, g2h, S(12), CLR_ROW, CLR_DIVIDER);
-    DrawHLine(hdc, sx + 1, sx + sw - 1, g2y + rH2, CLR_DIVIDER);
+    DrawHLine(hdc, sx + 1, sx + sw - 1, g2y + m.rH2, CLR_DIVIDER);
 
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
-    RECT r5t = { sx + S(14), g2y, sx + sw - S(160), g2y + rH2 };
+    RECT r5t = { sx + S(12), g2y, sx + sw - S(150), g2y + m.rH2 };
     DrawTextA(hdc, T("Minutos", "Minutes"), -1, &r5t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    RECT r6t = { sx + S(14), g2y + rH2, sx + sw - S(160), g2y + rH2 * 2 };
+    RECT r6t = { sx + S(12), g2y + m.rH2, sx + sw - S(150), g2y + m.rH2 * 2 };
     DrawTextA(hdc, T("Segundos adicionais", "Additional seconds"), -1, &r6t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // SECAO 3: Button Options
+    int g3y = oy + m.g3y;
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontSection);
-    RECT rcS3 = { sx, g3y - S(24), sx + sw, g3y - S(4) };
+    RECT rcS3 = { sx, g3y - S(22), sx + sw, g3y - S(3) };
     DrawTextA(hdc, T("Opcoes do Botao", "Button Options"), -1, &rcS3, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    int g3h = rH3 * 2;
+    int g3h = m.rH3 * 2;
     FillRoundRect(hdc, sx, g3y, sw, g3h, S(12), CLR_ROW, CLR_DIVIDER);
-    DrawHLine(hdc, sx + 1, sx + sw - 1, g3y + rH3, CLR_DIVIDER);
+    DrawHLine(hdc, sx + 1, sx + sw - 1, g3y + m.rH3, CLR_DIVIDER);
 
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
-    RECT r7t = { sx + S(14), g3y, sx + sw - S(150), g3y + rH3 };
+    RECT r7t = { sx + S(12), g3y, sx + sw - S(140), g3y + m.rH3 };
     DrawTextA(hdc, T("Botao do Mouse", "Mouse Button"), -1, &r7t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    RECT r8t = { sx + S(14), g3y + rH3, sx + sw - S(150), g3y + rH3 * 2 };
+    RECT r8t = { sx + S(12), g3y + m.rH3, sx + sw - S(140), g3y + m.rH3 * 2 };
     DrawTextA(hdc, T("Clique Duplo", "Double Click"), -1, &r8t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     BitBlt(hdcScreen, 0, 0, cw, ch, hdc, 0, 0, SRCCOPY);
@@ -781,7 +854,7 @@ static void DrawOwnerButton(DRAWITEMSTRUCT *dis) {
         BOOL isOn = (id == IDC_SW_ENABLED) ? t->enabled :
                     (id == IDC_SW_FIXED)   ? t->use_fixed : t->double_click;
 
-        int swW = S(44), swH = S(24);
+        int swW = S(42), swH = S(22);
         int swX = (w - swW) / 2;
         int swY = (h - swH) / 2;
         COLORREF track = isOn ? CLR_ACCENT : CLR_SWITCH_OFF;
@@ -912,6 +985,32 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             LayoutControls(hwnd);
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
+
+        case WM_MOUSEWHEEL: {
+            int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+            int step = (delta / 120) * S(48);
+            if (step == 0) step = (delta > 0) ? S(48) : -S(48);
+            SetScrollPosAndRefresh(hwnd, g_scroll_y - step);
+            return 0;
+        }
+
+        case WM_VSCROLL: {
+            SCROLLINFO si = {0};
+            si.cbSize = sizeof(SCROLLINFO);
+            si.fMask  = SIF_ALL;
+            GetScrollInfo(hwnd, SB_VERT, &si);
+            int pos = g_scroll_y;
+            switch (LOWORD(wParam)) {
+                case SB_LINEUP:        pos -= S(32); break;
+                case SB_LINEDOWN:      pos += S(32); break;
+                case SB_PAGEUP:        pos -= (int)si.nPage; break;
+                case SB_PAGEDOWN:      pos += (int)si.nPage; break;
+                case SB_THUMBTRACK:
+                case SB_THUMBPOSITION: pos = si.nTrackPos; break;
+            }
+            SetScrollPosAndRefresh(hwnd, pos);
+            return 0;
+        }
 
         case WM_ERASEBKGND:
             return 1;
@@ -1127,7 +1226,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nC
     icex.dwICC = ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES;
     InitCommonControlsEx(&icex);
 
-    // Detectar DPI do monitor principal antes de dimensionar a janela
     HDC hdcScr = GetDC(NULL);
     if (hdcScr) {
         int dpi = GetDeviceCaps(hdcScr, LOGPIXELSX);
@@ -1153,7 +1251,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nC
         return 1;
     }
 
-    DWORD style = WS_OVERLAPPEDWINDOW;
+    DWORD style = WS_OVERLAPPEDWINDOW | WS_VSCROLL;
     RECT rcWin = { 0, 0, S(BASE_CLIENT_W), S(BASE_CLIENT_H) };
     AdjustWindowRect(&rcWin, style, FALSE);
 
