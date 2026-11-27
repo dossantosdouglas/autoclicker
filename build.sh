@@ -33,6 +33,7 @@ clang -O2 \
   /usr/lib/wine/x86_64-windows/libkernel32.a \
   /usr/lib/wine/x86_64-windows/libcomctl32.a \
   /usr/lib/wine/x86_64-windows/libgdi32.a \
+  /usr/lib/wine/x86_64-windows/libdwmapi.a \
   -o release/AutoClicker.exe
 
 echo "✓ release/AutoClicker.exe gerado com sucesso! ($(ls -lh release/AutoClicker.exe | awk '{print $5}'))"

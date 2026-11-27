@@ -4,8 +4,8 @@
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,2,0
-PRODUCTVERSION 1,0,2,0
+FILEVERSION 1,1,0,0
+PRODUCTVERSION 1,1,0,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -18,23 +18,23 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Douglas dos Santos"
             VALUE "FileDescription", "AutoClicker Multi-Ponto"
-            VALUE "FileVersion", "1.0.2.0"
+            VALUE "FileVersion", "1.1.0.0"
             VALUE "InternalName", "AutoClicker"
             VALUE "LegalCopyright", "Copyright (C) 2026 Douglas dos Santos"
             VALUE "OriginalFilename", "AutoClicker.exe"
             VALUE "ProductName", "AutoClicker Multi-Ponto"
-            VALUE "ProductVersion", "1.0.2.0"
+            VALUE "ProductVersion", "1.1.0.0"
         END
         BLOCK "041604b0"
         BEGIN
             VALUE "CompanyName", "Douglas dos Santos"
             VALUE "FileDescription", "AutoClicker Multi-Ponto"
-            VALUE "FileVersion", "1.0.2.0"
+            VALUE "FileVersion", "1.1.0.0"
             VALUE "InternalName", "AutoClicker"
             VALUE "LegalCopyright", "Copyright (C) 2026 Douglas dos Santos"
             VALUE "OriginalFilename", "AutoClicker.exe"
             VALUE "ProductName", "AutoClicker Multi-Ponto"
-            VALUE "ProductVersion", "1.0.2.0"
+            VALUE "ProductVersion", "1.1.0.0"
         END
     END
     BLOCK "VarFileInfo"
