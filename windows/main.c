@@ -11,7 +11,6 @@
 
 #define IDI_APP_ICON 101
 #define TIMER_TICK   1001
-#define HOTKEY_F6    1
 
 // IDs de controles
 #define IDC_BTN_TOGGLE       2001
@@ -159,9 +158,7 @@ void DoMouseAction(DWORD flags) {
     INPUT input = {0};
     input.type = INPUT_MOUSE;
     input.mi.dwFlags = flags;
-    if (SendInput(1, &input, sizeof(INPUT)) == 0) {
-        mouse_event(flags, 0, 0, 0, 0);
-    }
+    SendInput(1, &input, sizeof(INPUT));
 }
 
 void ExecuteClick(TargetConfig *t) {
@@ -306,10 +303,10 @@ void ToggleRunning(void) {
         g_p2.next_tick = now + interval_p2;
 
         SetTimer(g_hMainWnd, TIMER_TICK, 100, NULL);
-        SetDlgItemTextA(g_hMainWnd, IDC_BTN_TOGGLE, "[X] PARAR AUTOCLICKER (F6)");
+        SetDlgItemTextA(g_hMainWnd, IDC_BTN_TOGGLE, "[X] PARAR AUTOCLICKER");
     } else {
         KillTimer(g_hMainWnd, TIMER_TICK);
-        SetDlgItemTextA(g_hMainWnd, IDC_BTN_TOGGLE, "[>] INICIAR AUTOCLICKER (F6)");
+        SetDlgItemTextA(g_hMainWnd, IDC_BTN_TOGGLE, "[>] INICIAR AUTOCLICKER");
         UpdateUIFromConfig();
     }
 }
@@ -322,15 +319,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             g_hFontBold = CreateFontA(-13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
             g_hFontBig = CreateFontA(-16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
 
-            RegisterHotKey(hwnd, HOTKEY_F6, 0, VK_F6);
             break;
         }
-
-        case WM_HOTKEY:
-            if (wParam == HOTKEY_F6) {
-                ToggleRunning();
-            }
-            break;
 
         case WM_LBUTTONDOWN:
             if (g_picking_target > 0) {
@@ -344,6 +334,10 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         case WM_KEYDOWN:
             if (wParam == VK_ESCAPE && g_picking_target > 0) {
                 CancelCapture();
+                return 0;
+            }
+            if (wParam == VK_F6 || wParam == VK_SPACE) {
+                ToggleRunning();
                 return 0;
             }
             break;
@@ -416,7 +410,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         case WM_CLOSE:
             SyncConfigFromUI();
             SaveConfig();
-            UnregisterHotKey(hwnd, HOTKEY_F6);
             DestroyWindow(hwnd);
             return 0;
 
@@ -437,7 +430,7 @@ static BOOL CALLBACK SetChildFontProc(HWND hChild, LPARAM lp) {
 // Criação de controles
 void BuildControls(HWND hWnd, HINSTANCE hInst) {
     // Botão Iniciar/Parar
-    HWND hBtnToggle = CreateWindowExA(0, "BUTTON", "[>] INICIAR AUTOCLICKER (F6)",
+    HWND hBtnToggle = CreateWindowExA(0, "BUTTON", "[>] INICIAR AUTOCLICKER",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
         20, 16, 500, 48, hWnd, (HMENU)IDC_BTN_TOGGLE, hInst, NULL);
     SendMessageA(hBtnToggle, WM_SETFONT, (WPARAM)g_hFontBig, TRUE);

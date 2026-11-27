@@ -22,6 +22,10 @@ clang -O2 \
   -fuse-ld=lld \
   -Wl,-subsystem:windows \
   -Wl,-entry:WinMainCRTStartup \
+  -Wl,/DYNAMICBASE \
+  -Wl,/NXCOMPAT \
+  -Wl,/HIGHENTROPYVA \
+  -Wl,/TSAWARE \
   -Wl,-nodefaultlib \
   windows/main.c \
   windows/resources.res \
@@ -32,3 +36,8 @@ clang -O2 \
   -o release/AutoClicker.exe
 
 echo "✓ release/AutoClicker.exe gerado com sucesso! ($(ls -lh release/AutoClicker.exe | awk '{print $5}'))"
+
+echo "=== 4. Empacotando Release ZIP para Windows ==="
+python3 -c "import zipfile; z = zipfile.ZipFile('release/AutoClicker-Windows-x64.zip', 'w', zipfile.ZIP_DEFLATED); z.write('release/AutoClicker.exe', 'AutoClicker.exe'); z.write('README.md', 'README.md'); z.close()"
+echo "✓ release/AutoClicker-Windows-x64.zip gerado com sucesso!"
+
