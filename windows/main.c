@@ -1,8 +1,7 @@
 /*
- * AutoClicker Multi-Ponto para Windows (Adwaita Dark Red UI)
- * Design fiel a versao Linux GTK4/Libadwaita com tema escuro nativo,
- * acento vermelho vibrante (#E0344A), cards agrupados, steppers (- / +),
- * presets rapidos (5s a 10 min), seletor visual multi-monitor e persistencia.
+ * AutoClicker Multi-Point / Multi-Ponto for Windows (Adwaita Dark Red UI)
+ * Native Win32 64-bit with dark titlebar, rounded grouped cards, steppers,
+ * quick presets, multi-monitor picker, auto-save, and built-in EN / PT support.
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -13,6 +12,12 @@
 #define IDI_APP_ICON 101
 #define TIMER_TICK   1001
 #define TIMER_TOAST  1002
+
+#ifdef DEFAULT_LANG_EN
+#define INIT_LANG 1
+#else
+#define INIT_LANG 0
+#endif
 
 // Paleta de Cores fiel ao GTK4 / Libadwaita Dark + Red Accent
 #define CLR_BG            RGB(36, 36, 36)     // #242424 Fundo principal
@@ -47,6 +52,7 @@
 #define IDC_BTN_TOGGLE       2002
 #define IDC_TAB_P1           2003
 #define IDC_TAB_P2           2004
+#define IDC_BTN_LANG         2005
 
 #define IDC_SW_ENABLED       2101
 #define IDC_SW_FIXED         2102
@@ -83,7 +89,7 @@ typedef struct {
     int y;
     int minutes;
     int seconds;
-    int button; // 0=Esquerdo, 1=Direito, 2=Meio
+    int button; // 0=Left, 1=Right, 2=Middle
     BOOL double_click;
     DWORD next_tick;
     DWORD interval_ms;
@@ -95,12 +101,13 @@ static TargetConfig g_targets[2] = {
     { TRUE, TRUE, 800, 600, 5, 0, 0, FALSE, 0, 300000, 0 }
 };
 
-static int g_active_tab = 0; // 0 = Ponto 1, 1 = Ponto 2
+static int g_lang = INIT_LANG; // 0 = PT-BR, 1 = EN
+static int g_active_tab = 0;   // 0 = Point 1, 1 = Point 2
 static BOOL g_is_running = FALSE;
 static BOOL g_play_sound = TRUE;
 static BOOL g_show_saved_toast = FALSE;
 static BOOL g_updating_ui = FALSE;
-static int g_picking_target = -1; // -1 = nenhum, 0 = P1, 1 = P2
+static int g_picking_target = -1; // -1 = none, 0 = P1, 1 = P2
 
 static HWND g_hMainWnd = NULL;
 
@@ -121,6 +128,10 @@ static HBRUSH g_brRow    = NULL;
 
 static char g_ini_path[MAX_PATH] = {0};
 
+static const char *T(const char *pt, const char *en) {
+    return (g_lang == 1) ? en : pt;
+}
+
 static TargetConfig *CurTarget(void) {
     return &g_targets[g_active_tab];
 }
@@ -136,9 +147,9 @@ static void RecalcInterval(TargetConfig *t) {
 }
 
 static const char *GetMouseBtnLabel(int btn) {
-    if (btn == 1) return "Direito  v";
-    if (btn == 2) return "Meio  v";
-    return "Esquerdo  v";
+    if (btn == 1) return T("Direito  v", "Right  v");
+    if (btn == 2) return T("Meio  v", "Middle  v");
+    return T("Esquerdo  v", "Left  v");
 }
 
 static void InitIniPath(void) {
@@ -155,6 +166,8 @@ static void InitIniPath(void) {
 static void LoadConfig(void) {
     InitIniPath();
     g_play_sound = GetPrivateProfileIntA("General", "PlaySound", 1, g_ini_path);
+    g_lang       = GetPrivateProfileIntA("General", "Language", INIT_LANG, g_ini_path);
+    if (g_lang != 0 && g_lang != 1) g_lang = INIT_LANG;
 
     const char *secs[2] = { "Point1", "Point2" };
     int defX[2] = { 500, 800 };
@@ -179,6 +192,8 @@ static void SaveConfig(void) {
     char buf[32];
     wsprintfA(buf, "%d", g_play_sound);
     WritePrivateProfileStringA("General", "PlaySound", buf, g_ini_path);
+    wsprintfA(buf, "%d", g_lang);
+    WritePrivateProfileStringA("General", "Language", buf, g_ini_path);
 
     const char *secs[2] = { "Point1", "Point2" };
     for (int i = 0; i < 2; i++) {
@@ -254,10 +269,10 @@ static void SyncEditBoxesToTarget(void) {
 
 static void RedrawAll(void) {
     if (!g_hMainWnd) return;
+    SetWindowTextA(g_hMainWnd, T("AutoClicker Multi-Ponto", "AutoClicker Multi-Point"));
     InvalidateRect(g_hMainWnd, NULL, FALSE);
-    // Forcar redesenho dos botoes owner-draw
     int ids[] = {
-        IDC_BTN_SAVE, IDC_BTN_TOGGLE, IDC_TAB_P1, IDC_TAB_P2,
+        IDC_BTN_SAVE, IDC_BTN_LANG, IDC_BTN_TOGGLE, IDC_TAB_P1, IDC_TAB_P2,
         IDC_SW_ENABLED, IDC_SW_FIXED, IDC_BTN_PICK,
         IDC_BTN_X_DEC, IDC_BTN_X_INC, IDC_BTN_Y_DEC, IDC_BTN_Y_INC,
         IDC_BTN_MIN_DEC, IDC_BTN_MIN_INC, IDC_BTN_SEC_DEC, IDC_BTN_SEC_INC,
@@ -377,12 +392,14 @@ static void PaintMainWindow(HWND hwnd) {
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontHdrTitle);
     RECT rcHdrT = { 90, 6, cw - 90, 26 };
-    DrawTextA(hdc, "AutoClicker Multi-Ponto", -1, &rcHdrT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("AutoClicker Multi-Ponto", "AutoClicker Multi-Point"), -1, &rcHdrT, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     SetTextColor(hdc, g_show_saved_toast ? CLR_GREEN : CLR_TEXT_SUB);
     SelectObject(hdc, g_hFontHdrSub);
     RECT rcHdrS = { 90, 25, cw - 90, 42 };
-    DrawTextA(hdc, g_show_saved_toast ? "Configuracoes salvas com sucesso!" : "Suporte a multiplos monitores (X e Y)",
+    DrawTextA(hdc, g_show_saved_toast
+              ? T("Configuracoes salvas com sucesso!", "Settings saved successfully!")
+              : T("Suporte a multiplos monitores (X e Y)", "Multi-monitor support (X & Y)"),
               -1, &rcHdrS, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     // 3. Card Principal (#2E2E2E)
@@ -391,21 +408,28 @@ static void PaintMainWindow(HWND hwnd) {
     FillRoundRect(hdc, cx, cy, cwCard, chCard, 14, CLR_CARD, CLR_CARD_BORDER);
 
     // Titulo do Ponto dentro do Card
-    const char *pTitle = (g_active_tab == 0) ? "Ponto 1 (Tempo X)" : "Ponto 2 (Tempo Y)";
+    const char *pTitle = (g_active_tab == 0)
+        ? T("Ponto 1 (Tempo X)", "Point 1 (Time X)")
+        : T("Ponto 2 (Tempo Y)", "Point 2 (Time Y)");
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontCardTitle);
     RECT rcPTitle = { cx + 16, cy + 12, cx + 320, cy + 36 };
     DrawTextA(hdc, pTitle, -1, &rcPTitle, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // Status (esq) e Cliques (dir)
-    const char *stText = !t->enabled ? "Desativado" : (g_is_running ? "Ativo - Contando" : "Parado");
+    const char *stText = !t->enabled
+        ? T("Desativado", "Disabled")
+        : (g_is_running ? T("Ativo - Contando", "Active - Running") : T("Parado", "Stopped"));
     SetTextColor(hdc, CLR_TEXT_MUTED);
     SelectObject(hdc, g_hFontSmall);
     RECT rcSt = { cx + 16, cy + 38, cx + 220, cy + 54 };
     DrawTextA(hdc, stText, -1, &rcSt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     char cntBuf[48];
-    wsprintfA(cntBuf, "%d clique%s", t->total_clicks, (t->total_clicks == 1) ? "" : "s");
+    if (g_lang == 1)
+        wsprintfA(cntBuf, "%d click%s", t->total_clicks, (t->total_clicks == 1) ? "" : "s");
+    else
+        wsprintfA(cntBuf, "%d clique%s", t->total_clicks, (t->total_clicks == 1) ? "" : "s");
     SetTextColor(hdc, CLR_ACCENT);
     RECT rcCnt = { cx + cwCard - 140, cy + 38, cx + cwCard - 16, cy + 54 };
     DrawTextA(hdc, cntBuf, -1, &rcCnt, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
@@ -435,84 +459,85 @@ static void PaintMainWindow(HWND hwnd) {
     }
 
     // ==============================================
-    // SECAO 1: Local do Clique (Multi-Monitor)
+    // SECAO 1: Click Location / Local do Clique
     // ==============================================
     int sx = cx + 16, sw = cwCard - 32;
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontSection);
     RECT rcS1 = { sx, cy + 114, sx + sw, cy + 132 };
-    DrawTextA(hdc, "Local do Clique (Multi-Monitor)", -1, &rcS1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Local do Clique (Multi-Monitor)", "Click Location (Multi-Monitor)"), -1, &rcS1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    int g1y = cy + 136, g1h = 168; // 4 linhas x 42px
+    int g1y = cy + 136, g1h = 168;
     FillRoundRect(hdc, sx, g1y, sw, g1h, 12, CLR_ROW, CLR_DIVIDER);
     DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + 42, CLR_DIVIDER);
     DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + 84, CLR_DIVIDER);
     DrawHLine(hdc, sx + 1, sx + sw - 1, g1y + 126, CLR_DIVIDER);
 
-    // Row 1: Usar Posicao Fixa
+    // Row 1: Use Fixed Screen Position
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
     RECT r1t = { sx + 14, g1y + 6, sx + 360, g1y + 23 };
-    DrawTextA(hdc, "Usar Posicao Fixa na Tela", -1, &r1t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Usar Posicao Fixa na Tela", "Use Fixed Screen Position"), -1, &r1t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SetTextColor(hdc, CLR_TEXT_SUB); SelectObject(hdc, g_hFontSmall);
     RECT r1s = { sx + 14, g1y + 22, sx + 380, g1y + 38 };
-    DrawTextA(hdc, "Mover o mouse para coordenadas especificas antes de clicar", -1, &r1s, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Mover o mouse para coordenadas especificas antes de clicar", "Move mouse to specific coordinates before clicking"),
+              -1, &r1s, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    // Row 2: Selecionar Alvo Visualmente
+    // Row 2: Pick Target Visually
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
     RECT r2t = { sx + 14, g1y + 48, sx + 320, g1y + 65 };
-    DrawTextA(hdc, "Selecionar Alvo Visualmente", -1, &r2t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Selecionar Alvo Visualmente", "Pick Target Visually"), -1, &r2t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SetTextColor(hdc, CLR_TEXT_SUB); SelectObject(hdc, g_hFontSmall);
     RECT r2s = { sx + 14, g1y + 64, sx + 320, g1y + 80 };
     char coordHint[80];
-    wsprintfA(coordHint, "Alvo atual: Global (%d, %d)", t->x, t->y);
+    wsprintfA(coordHint, T("Alvo atual: Global (%d, %d)", "Current target: Global (%d, %d)"), t->x, t->y);
     DrawTextA(hdc, coordHint, -1, &r2s, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    // Row 3: Coordenada Global X
+    // Row 3: Global X Coordinate
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
     RECT r3t = { sx + 14, g1y + 84, sx + 300, g1y + 126 };
-    DrawTextA(hdc, "Coordenada Global X (pixels)", -1, &r3t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Coordenada Global X (pixels)", "Global X Coordinate (pixels)"), -1, &r3t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    // Row 4: Coordenada Global Y
+    // Row 4: Global Y Coordinate
     RECT r4t = { sx + 14, g1y + 126, sx + 300, g1y + 168 };
-    DrawTextA(hdc, "Coordenada Global Y (pixels)", -1, &r4t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Coordenada Global Y (pixels)", "Global Y Coordinate (pixels)"), -1, &r4t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // ==============================================
-    // SECAO 2: Intervalo de Tempo
+    // SECAO 2: Time Interval / Intervalo de Tempo
     // ==============================================
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontSection);
     RECT rcS2 = { sx, cy + 314, sx + sw, cy + 332 };
-    DrawTextA(hdc, "Intervalo de Tempo", -1, &rcS2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Intervalo de Tempo", "Time Interval"), -1, &rcS2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    int g2y = cy + 336, g2h = 76; // 2 linhas x 38px
+    int g2y = cy + 336, g2h = 76;
     FillRoundRect(hdc, sx, g2y, sw, g2h, 12, CLR_ROW, CLR_DIVIDER);
     DrawHLine(hdc, sx + 1, sx + sw - 1, g2y + 38, CLR_DIVIDER);
 
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
     RECT r5t = { sx + 14, g2y, sx + 300, g2y + 38 };
-    DrawTextA(hdc, "Minutos", -1, &r5t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Minutos", "Minutes"), -1, &r5t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     RECT r6t = { sx + 14, g2y + 38, sx + 300, g2y + 76 };
-    DrawTextA(hdc, "Segundos adicionais", -1, &r6t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Segundos adicionais", "Additional seconds"), -1, &r6t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // ==============================================
-    // SECAO 3: Opcoes do Botao
+    // SECAO 3: Button Options / Opcoes do Botao
     // ==============================================
     SetTextColor(hdc, CLR_TEXT_PRIMARY);
     SelectObject(hdc, g_hFontSection);
     RECT rcS3 = { sx, cy + 454, sx + sw, cy + 472 };
-    DrawTextA(hdc, "Opcoes do Botao", -1, &rcS3, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Opcoes do Botao", "Button Options"), -1, &rcS3, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    int g3y = cy + 476, g3h = 68; // 2 linhas x 34px
+    int g3y = cy + 476, g3h = 68;
     FillRoundRect(hdc, sx, g3y, sw, g3h, 12, CLR_ROW, CLR_DIVIDER);
     DrawHLine(hdc, sx + 1, sx + sw - 1, g3y + 34, CLR_DIVIDER);
 
     SetTextColor(hdc, CLR_TEXT_PRIMARY); SelectObject(hdc, g_hFontUi);
     RECT r7t = { sx + 14, g3y, sx + 300, g3y + 34 };
-    DrawTextA(hdc, "Botao do Mouse", -1, &r7t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Botao do Mouse", "Mouse Button"), -1, &r7t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     RECT r8t = { sx + 14, g3y + 34, sx + 300, g3y + 68 };
-    DrawTextA(hdc, "Clique Duplo", -1, &r8t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, T("Clique Duplo", "Double Click"), -1, &r8t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // Blit sem flicker
     BitBlt(hdcScreen, 0, 0, cw, ch, hdc, 0, 0, SRCCOPY);
@@ -531,9 +556,8 @@ static void DrawOwnerButton(DRAWITEMSTRUCT *dis) {
     int id = (int)dis->CtlID;
     BOOL pressed = (dis->itemState & ODS_SELECTED) != 0;
 
-    // Fundo atras dos cantos arredondados
     HBRUSH bgBr = g_brCard;
-    if (id == IDC_BTN_SAVE) bgBr = g_brHeader;
+    if (id == IDC_BTN_SAVE || id == IDC_BTN_LANG) bgBr = g_brHeader;
     else if (id == IDC_BTN_TOGGLE || id == IDC_TAB_P1 || id == IDC_TAB_P2) bgBr = g_brBg;
     else if (id == IDC_SW_FIXED || id == IDC_BTN_PICK || id == IDC_BTN_MBTN || id == IDC_SW_DBL ||
              (id >= IDC_BTN_X_DEC && id <= IDC_BTN_SEC_INC)) bgBr = g_brRow;
@@ -546,7 +570,17 @@ static void DrawOwnerButton(DRAWITEMSTRUCT *dis) {
         if (pressed) FillRoundRect(hdc, 0, 0, w, h, 8, CLR_BTN_DARK, CLR_BTN_DARK);
         SetTextColor(hdc, CLR_TEXT_PRIMARY);
         SelectObject(hdc, g_hFontUiBold);
-        DrawTextA(hdc, "Salvar", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawTextA(hdc, T("Salvar", "Save"), -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        return;
+    }
+
+    // 1b. Botao Idioma (EN / PT) no canto direito do Header
+    if (id == IDC_BTN_LANG) {
+        COLORREF bg = pressed ? CLR_BTN_DARK_PRS : CLR_BTN_DARK;
+        FillRoundRect(hdc, 0, 2, w, h - 4, 8, bg, CLR_DIVIDER);
+        SetTextColor(hdc, CLR_TEXT_PRIMARY);
+        SelectObject(hdc, g_hFontSmall);
+        DrawTextA(hdc, (g_lang == 1) ? "EN" : "PT", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return;
     }
 
@@ -557,8 +591,9 @@ static void DrawOwnerButton(DRAWITEMSTRUCT *dis) {
         FillRoundRect(hdc, 0, 0, w, h, 24, bg, bg);
         SetTextColor(hdc, CLR_TEXT_PRIMARY);
         SelectObject(hdc, g_hFontBtnBig);
-        DrawTextA(hdc, g_is_running ? "Parar AutoClicker (Ambos os Pontos)"
-                                    : "Iniciar AutoClicker (Ambos os Pontos)",
+        DrawTextA(hdc, g_is_running
+                  ? T("Parar AutoClicker (Ambos os Pontos)", "Stop AutoClicker (Both Points)")
+                  : T("Iniciar AutoClicker (Ambos os Pontos)", "Start AutoClicker (Both Points)"),
                   -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return;
     }
@@ -571,13 +606,15 @@ static void DrawOwnerButton(DRAWITEMSTRUCT *dis) {
         COLORREF bd = active ? CLR_ACCENT : CLR_CARD_BORDER;
         FillRoundRect(hdc, 0, 0, w, h, 10, bg, bd);
 
-        // Bolinha indicadora de ativado
         COLORREF dot = g_targets[idx].enabled ? CLR_ACCENT : CLR_SWITCH_OFF;
         FillRoundRect(hdc, 12, (h - 8) / 2, 8, 8, 8, dot, dot);
 
         char tBuf[16], lbl[64];
         FormatCountdown(&g_targets[idx], tBuf);
-        wsprintfA(lbl, "Ponto %d (%s)  -  %s", idx + 1, (idx == 0) ? "Tempo X" : "Tempo Y", tBuf);
+        if (g_lang == 1)
+            wsprintfA(lbl, "Point %d (%s)  -  %s", idx + 1, (idx == 0) ? "Time X" : "Time Y", tBuf);
+        else
+            wsprintfA(lbl, "Ponto %d (%s)  -  %s", idx + 1, (idx == 0) ? "Tempo X" : "Tempo Y", tBuf);
         SetTextColor(hdc, active ? CLR_TEXT_PRIMARY : CLR_TEXT_MUTED);
         SelectObject(hdc, active ? g_hFontUiBold : g_hFontUi);
         RECT rcT = { 24, 0, w - 8, h };
@@ -604,13 +641,15 @@ static void DrawOwnerButton(DRAWITEMSTRUCT *dis) {
         return;
     }
 
-    // 5. Botao "Marcar na Tela" (Vermelho vibrante igual ao print!)
+    // 5. Botao "Pick on Screen" / "Marcar na Tela"
     if (id == IDC_BTN_PICK) {
         COLORREF bg = pressed ? CLR_ACCENT_PRESS : CLR_ACCENT;
         FillRoundRect(hdc, 0, 0, w, h, 8, bg, bg);
         SetTextColor(hdc, CLR_TEXT_PRIMARY);
         SelectObject(hdc, g_hFontUiBold);
-        DrawTextA(hdc, (g_picking_target >= 0) ? "Clique no alvo..." : "Marcar na Tela",
+        DrawTextA(hdc, (g_picking_target >= 0)
+                  ? T("Clique no alvo...", "Click target...")
+                  : T("Marcar na Tela", "Pick on Screen"),
                   -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return;
     }
@@ -639,7 +678,7 @@ static void DrawOwnerButton(DRAWITEMSTRUCT *dis) {
         return;
     }
 
-    // 8. Botao Selecao de Mouse (Esquerdo v)
+    // 8. Botao Selecao de Mouse
     if (id == IDC_BTN_MBTN) {
         if (pressed) FillRoundRect(hdc, 0, 0, w, h, 6, CLR_BTN_DARK, CLR_BTN_DARK);
         SetTextColor(hdc, CLR_TEXT_PRIMARY);
@@ -648,14 +687,15 @@ static void DrawOwnerButton(DRAWITEMSTRUCT *dis) {
         return;
     }
 
-    // 9. Botao Testar Clique (Pill escuro na base do card)
+    // 9. Botao Testar Clique
     if (id == IDC_BTN_TEST) {
         COLORREF bg = pressed ? CLR_BTN_DARK_PRS : CLR_BTN_DARK;
         FillRoundRect(hdc, 0, 0, w, h, 10, bg, bg);
         SetTextColor(hdc, CLR_TEXT_PRIMARY);
         SelectObject(hdc, g_hFontUiBold);
-        const char *txt = (g_active_tab == 0) ? "Testar clique no Ponto 1 (Tempo X) agora"
-                                              : "Testar clique no Ponto 2 (Tempo Y) agora";
+        const char *txt = (g_active_tab == 0)
+            ? T("Testar clique no Ponto 1 (Tempo X) agora", "Test click on Point 1 (Time X) now")
+            : T("Testar clique no Ponto 2 (Tempo Y) agora", "Test click on Point 2 (Time Y) now");
         DrawTextA(hdc, txt, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return;
     }
@@ -689,7 +729,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             g_brCard   = CreateSolidBrush(CLR_CARD);
             g_brRow    = CreateSolidBrush(CLR_ROW);
 
-            // Barra de titulo escura nativa (Win 10/11) + cantos arredondados (Win 11)
             BOOL useDark = TRUE;
             DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &useDark, sizeof(useDark));
             DWORD cornerPref = 2; // DWMWCP_ROUND
@@ -761,6 +800,10 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 g_show_saved_toast = TRUE;
                 SetTimer(hwnd, TIMER_TOAST, 2500, NULL);
                 InvalidateRect(hwnd, NULL, FALSE);
+            } else if (id == IDC_BTN_LANG) {
+                g_lang = (g_lang == 1) ? 0 : 1;
+                SaveConfig();
+                RedrawAll();
             } else if (id == IDC_TAB_P1 && g_active_tab != 0) {
                 SyncEditBoxesToTarget();
                 g_active_tab = 0;
@@ -863,39 +906,37 @@ static HWND CreateOwnerBtn(HWND hParent, HINSTANCE hInst, int x, int y, int w, i
 }
 
 static void CreateMainControls(HWND hWnd, HINSTANCE hInst) {
-    // Header: Salvar
+    // Header: Save (left) & Language EN/PT (right)
     CreateOwnerBtn(hWnd, hInst, 12, 8, 68, 30, IDC_BTN_SAVE);
+    CreateOwnerBtn(hWnd, hInst, WIN_CLIENT_W - 56, 8, 42, 30, IDC_BTN_LANG);
 
-    // Botao Principal Vermelho Pill
+    // Main Red Pill Button
     CreateOwnerBtn(hWnd, hInst, 18, 56, 504, 42, IDC_BTN_TOGGLE);
 
-    // Abas Ponto 1 / Ponto 2
+    // Tabs Point 1 / Point 2
     CreateOwnerBtn(hWnd, hInst, 18,  106, 248, 34, IDC_TAB_P1);
     CreateOwnerBtn(hWnd, hInst, 274, 106, 248, 34, IDC_TAB_P2);
 
-    // Card base (cx = 18, cy = 148, sx = 34, sw = 472)
     int cy = 148;
     int sx = 34;
 
-    // Switch Ativar Ponto (topo direito do card)
+    // Enable Point Switch
     CreateOwnerBtn(hWnd, hInst, 456, cy + 12, 48, 26, IDC_SW_ENABLED);
 
-    // Secao 1: Local do Clique (g1y = cy + 136 = 284)
+    // Section 1: Click Location
     int g1y = cy + 136;
     CreateOwnerBtn(hWnd, hInst, 448, g1y + 8,  48, 26, IDC_SW_FIXED);
     CreateOwnerBtn(hWnd, hInst, 356, g1y + 47, 140, 32, IDC_BTN_PICK);
 
-    // X: Edit + (-) + (+)
     CreateDarkEdit(hWnd, hInst, 360, g1y + 96, 62, 20, IDC_EDT_X, FALSE);
     CreateOwnerBtn(hWnd, hInst, 434, g1y + 92, 26, 26, IDC_BTN_X_DEC);
     CreateOwnerBtn(hWnd, hInst, 468, g1y + 92, 26, 26, IDC_BTN_X_INC);
 
-    // Y: Edit + (-) + (+)
     CreateDarkEdit(hWnd, hInst, 360, g1y + 138, 62, 20, IDC_EDT_Y, FALSE);
     CreateOwnerBtn(hWnd, hInst, 434, g1y + 134, 26, 26, IDC_BTN_Y_DEC);
     CreateOwnerBtn(hWnd, hInst, 468, g1y + 134, 26, 26, IDC_BTN_Y_INC);
 
-    // Secao 2: Intervalo de Tempo (g2y = cy + 336 = 484)
+    // Section 2: Time Interval
     int g2y = cy + 336;
     CreateDarkEdit(hWnd, hInst, 360, g2y + 10, 62, 20, IDC_EDT_MIN, TRUE);
     CreateOwnerBtn(hWnd, hInst, 434, g2y + 6,  26, 26, IDC_BTN_MIN_DEC);
@@ -905,19 +946,19 @@ static void CreateMainControls(HWND hWnd, HINSTANCE hInst) {
     CreateOwnerBtn(hWnd, hInst, 434, g2y + 44, 26, 26, IDC_BTN_SEC_DEC);
     CreateOwnerBtn(hWnd, hInst, 468, g2y + 44, 26, 26, IDC_BTN_SEC_INC);
 
-    // Presets Rapidos (y = cy + 418 = 566)
+    // Quick Presets
     int py = cy + 418;
     int pw = 64;
     for (int i = 0; i < 7; i++) {
         CreateOwnerBtn(hWnd, hInst, sx + i * 68, py, pw, 28, IDC_PRESET_5S + i);
     }
 
-    // Secao 3: Opcoes do Botao (g3y = cy + 476 = 624)
+    // Section 3: Button Options
     int g3y = cy + 476;
     CreateOwnerBtn(hWnd, hInst, 386, g3y + 4,  108, 26, IDC_BTN_MBTN);
     CreateOwnerBtn(hWnd, hInst, 448, g3y + 38, 48,  26, IDC_SW_DBL);
 
-    // Botao Testar Clique (base do card)
+    // Test Click Button
     CreateOwnerBtn(hWnd, hInst, sx, cy + 552, 472, 32, IDC_BTN_TEST);
 }
 
@@ -944,7 +985,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nC
     }
 
     if (!RegisterClassA(&wc)) {
-        MessageBoxA(NULL, "Erro ao registrar classe da janela.", "AutoClicker", MB_ICONERROR);
+        MessageBoxA(NULL, "Failed to register window class.", "AutoClicker", MB_ICONERROR);
         return 1;
     }
 
@@ -960,14 +1001,14 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nC
     if (posY < 0) posY = 20;
 
     g_hMainWnd = CreateWindowExA(
-        0, "AutoClickerAdwaitaDarkClass", "AutoClicker Multi-Ponto",
+        0, "AutoClickerAdwaitaDarkClass", T("AutoClicker Multi-Ponto", "AutoClicker Multi-Point"),
         style,
         posX, posY, winW, winH,
         NULL, NULL, hInst, NULL
     );
 
     if (!g_hMainWnd) {
-        MessageBoxA(NULL, "Erro ao criar a janela principal.", "AutoClicker", MB_ICONERROR);
+        MessageBoxA(NULL, "Failed to create main window.", "AutoClicker", MB_ICONERROR);
         return 1;
     }
 
